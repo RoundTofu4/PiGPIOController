@@ -1,6 +1,6 @@
-# PiRelay - Raspberry Pi GPIO 17 Relay Controller
+# PiRelay - Raspberry Pi GPIO Relay Controller
 
-A sleek, responsive, glassmorphic dark-theme web dashboard for controlling a low-level trigger relay on GPIO 17 and monitoring status pins (GPIO 17 and GPIO 18) of a Raspberry Pi 3B.
+A sleek, responsive, glassmorphic dark-theme web dashboard for controlling GPIO and monitoring status pins of a Raspberry Pi 3B.
 
 The application automatically runs in **Mock Mode** when hosted on a laptop/local machine where `pinctrl` is not available, writing fake states to `mock_state.json`. When deployed to a Raspberry Pi, it uses the official `pinctrl` command-line utility.
 
@@ -10,7 +10,7 @@ The application automatically runs in **Mock Mode** when hosted on a laptop/loca
 
 - **Responsive Control Panel**: Works seamlessly on phone screens, tablets, and desktops.
 - **Glassmorphic Theme**: A modern dark user interface with glowing CSS visual indicators.
-- **Real-Time Monitoring**: Periodic polling of pin levels (GPIO 17 and 18).
+- **Real-Time Monitoring**: Periodic polling of pin levels.
 - **Diagnostics Log**: Interactive terminal panel demonstrating the PHP API queries and executions.
 - **Double-Safety Relays**: Standardized for Active-LOW relays (low trigger: `op dl` turns on, `op dh` turns off).
 
