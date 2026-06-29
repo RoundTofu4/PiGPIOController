@@ -958,3 +958,53 @@ body {
         gap: 16px;
     }
 }
+
+/* Momentary Pulse Button Styling */
+.power-switch.momentary-btn {
+    border-color: rgba(56, 189, 248, 0.22);
+    box-shadow: 
+        0 10px 20px rgba(0, 0, 0, 0.5),
+        inset 0 2px 5px rgba(255, 255, 255, 0.1),
+        0 0 5px rgba(56, 189, 248, 0.1);
+}
+
+.power-switch.momentary-btn .power-icon {
+    stroke: var(--color-primary);
+}
+
+.power-switch.momentary-btn:hover {
+    border-color: rgba(56, 189, 248, 0.4);
+    box-shadow: 
+        0 10px 20px rgba(0, 0, 0, 0.5),
+        inset 0 2px 5px rgba(255, 255, 255, 0.15),
+        0 0 10px rgba(56, 189, 248, 0.25);
+}
+
+/* Pulsing Active State for Momentary Switch */
+.power-switch.momentary-btn.pulsing {
+    border-color: var(--color-green);
+    animation: pulse-ripple 1s infinite cubic-bezier(0.1, 0.8, 0.3, 1);
+    cursor: not-allowed;
+    pointer-events: none;
+    transform: scale(0.97);
+}
+
+.power-switch.momentary-btn.pulsing .power-icon {
+    stroke: var(--color-green);
+    filter: drop-shadow(0 0 8px var(--color-green));
+}
+
+@keyframes pulse-ripple {
+    0% {
+        box-shadow: 
+            0 0 0 0px rgba(16, 185, 129, 0.6),
+            0 0 10px rgba(16, 185, 129, 0.4),
+            inset 0 2px 5px rgba(255, 255, 255, 0.2);
+    }
+    100% {
+        box-shadow: 
+            0 0 0 25px rgba(16, 185, 129, 0),
+            0 0 0px rgba(16, 185, 129, 0),
+            inset 0 2px 5px rgba(255, 255, 255, 0.2);
+    }
+}

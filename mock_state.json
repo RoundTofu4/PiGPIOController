@@ -4,5 +4,11 @@
         "func": "op",
         "level": "hi",
         "raw": "17: op dh pd | hi (Mocked)"
+    },
+    "18": {
+        "pin": "18",
+        "func": "op",
+        "level": "hi",
+        "raw": "18: op dh pd | hi (Mocked)"
     }
 }

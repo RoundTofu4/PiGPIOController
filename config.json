@@ -4,7 +4,15 @@
             "pin": "17",
             "name": "STB Armbian",
             "mode": "control",
-            "active_low": true
+            "active_low": true,
+            "pulse_duration": 1000
+        },
+        {
+            "pin": "18",
+            "name": "test1",
+            "mode": "momentary",
+            "active_low": true,
+            "pulse_duration": 5000
         }
     ]
 }
