@@ -1,6 +1,6 @@
 <?php
 /**
- * Raspberry Pi GPIO Relay Controller API - Dynamic Version
+ * Raspberry Pi GPIO Relay Controller API - Dynamic Version with Momentary Mode
  * Supports dynamic configuration via config.json, real pinctrl execution, and laptop mocking.
  */
 
@@ -78,8 +78,9 @@ function get_mock_state($pins_config) {
         
         if (!isset($mock_state[$pin_num])) {
             // Initialize new mock pin
-            $def_level = ($p['mode'] === 'control' && $p['active_low']) ? 'hi' : 'lo'; // hi means relay off initially if active_low
-            $def_func = ($p['mode'] === 'control') ? 'op' : 'ip';
+            $is_output_mode = ($p['mode'] === 'control' || $p['mode'] === 'momentary');
+            $def_level = $is_output_mode ? ($p['active_low'] ? 'hi' : 'lo') : 'lo'; // hi means relay off initially if active_low
+            $def_func = $is_output_mode ? 'op' : 'ip';
             $dir_val = ($def_level === 'hi') ? 'dh' : 'dl';
             $mock_state[$pin_num] = [
                 'pin' => $pin_num,
@@ -172,7 +173,7 @@ function get_pins_status($config, $is_real_pi) {
             $parsed = parse_pinctrl_line($line);
             
             if ($parsed) {
-                // If it parsed, merge it with configuration details (name, mode, active_low)
+                // If it parsed, merge it with configuration details
                 $status[$pin] = array_merge($p, $parsed);
             } else {
                 $status[$pin] = array_merge($p, [
@@ -183,7 +184,7 @@ function get_pins_status($config, $is_real_pi) {
             }
             
             // Calculate active state for controls
-            if ($p['mode'] === 'control') {
+            if ($p['mode'] === 'control' || $p['mode'] === 'momentary') {
                 $lvl = $status[$pin]['level'];
                 if ($lvl === 'unknown') {
                     $status[$pin]['status'] = 'UNKNOWN';
@@ -199,17 +200,18 @@ function get_pins_status($config, $is_real_pi) {
         $status = [];
         foreach ($config['pins'] as $p) {
             $pin = $p['pin'];
+            $is_output_mode = ($p['mode'] === 'control' || $p['mode'] === 'momentary');
             $mock_pin_data = isset($mock_state[$pin]) ? $mock_state[$pin] : [
                 'pin' => $pin,
-                'func' => ($p['mode'] === 'control') ? 'op' : 'ip',
-                'level' => ($p['mode'] === 'control' && $p['active_low']) ? 'hi' : 'lo',
+                'func' => $is_output_mode ? 'op' : 'ip',
+                'level' => ($is_output_mode && $p['active_low']) ? 'hi' : 'lo',
                 'raw' => "{$pin}: op | (Mocked Default)"
             ];
             
             $status[$pin] = array_merge($p, $mock_pin_data);
             
             // Calculate active state for controls
-            if ($p['mode'] === 'control') {
+            if ($p['mode'] === 'control' || $p['mode'] === 'momentary') {
                 $lvl = $status[$pin]['level'];
                 $isOn = $p['active_low'] ? ($lvl === 'lo') : ($lvl === 'hi');
                 $status[$pin]['status'] = $isOn ? 'ON' : 'OFF';
@@ -284,18 +286,36 @@ if ($action === 'toggle' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
     
-    if (!$pin_conf || $pin_conf['mode'] !== 'control') {
-        echo json_encode(['success' => false, 'error' => 'Pin is not configured for control']);
+    if (!$pin_conf || ($pin_conf['mode'] !== 'control' && $pin_conf['mode'] !== 'momentary')) {
+        echo json_encode(['success' => false, 'error' => 'Pin is not configured for control output']);
         exit;
     }
     
-    $pins = get_pins_status($config, $is_real_pi);
-    $current_level = isset($pins[$pin]['level']) ? $pins[$pin]['level'] : 'hi';
+    $success = false;
     
-    // Toggle level: if lo -> hi, if hi -> lo
-    $next_level = ($current_level === 'lo') ? 'hi' : 'lo';
-    
-    $success = set_pin_state($pin, $next_level, $is_real_pi, $config);
+    if ($pin_conf['mode'] === 'momentary') {
+        // Safe backend Momentary pulse execution
+        $active_level = $pin_conf['active_low'] ? 'lo' : 'hi';
+        $inactive_level = $pin_conf['active_low'] ? 'hi' : 'lo';
+        $duration = isset($pin_conf['pulse_duration']) ? (int)$pin_conf['pulse_duration'] : 1000;
+        
+        // 1. Trigger Pulse ON
+        $success = set_pin_state($pin, $active_level, $is_real_pi, $config);
+        
+        if ($success) {
+            // 2. Wait
+            usleep($duration * 1000);
+            // 3. Trigger Pulse OFF (Restore to idle)
+            set_pin_state($pin, $inactive_level, $is_real_pi, $config);
+        }
+    } else {
+        // Latch mode toggling (Standard control)
+        $pins = get_pins_status($config, $is_real_pi);
+        $current_level = isset($pins[$pin]['level']) ? $pins[$pin]['level'] : 'hi';
+        $next_level = ($current_level === 'lo') ? 'hi' : 'lo';
+        
+        $success = set_pin_state($pin, $next_level, $is_real_pi, $config);
+    }
     
     // For mock mode: also randomly toggle any monitor pins to simulate sensory feedback changes
     if (!$is_real_pi) {
@@ -359,14 +379,31 @@ if ($action === 'save_config' && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $name = "GPIO " . $pin_num;
         }
         
-        $mode = $p['mode'] === 'control' ? 'control' : 'monitor';
+        // Mode validation: control (latch), momentary (pulse), monitor (input)
+        $mode = 'monitor';
+        if ($p['mode'] === 'control') {
+            $mode = 'control';
+        } elseif ($p['mode'] === 'momentary') {
+            $mode = 'momentary';
+        }
+        
         $active_low = isset($p['active_low']) ? (bool)$p['active_low'] : false;
+        
+        $pulse_duration = 1000;
+        if ($mode === 'momentary') {
+            $pulse_duration = isset($p['pulse_duration']) ? (int)$p['pulse_duration'] : 1000;
+            if ($pulse_duration < 100 || $pulse_duration > 5000) {
+                echo json_encode(['success' => false, 'error' => 'Pulse duration must be between 100ms and 5000ms']);
+                exit;
+            }
+        }
         
         $validated_pins[] = [
             'pin' => (string)$pin_num,
             'name' => $name,
             'mode' => $mode,
-            'active_low' => $active_low
+            'active_low' => $active_low,
+            'pulse_duration' => $pulse_duration
         ];
     }
     

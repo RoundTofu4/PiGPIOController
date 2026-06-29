@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Raspberry Pi GPIO Controller</title>
+    <title>PiRelay - Raspberry Pi GPIO Controller</title>
     
     <!-- Google Fonts for Premium Typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -22,7 +22,7 @@
         <header class="app-header">
             <div class="logo-area">
                 <div class="pulse-ring"></div>
-                <h1>PiGPIOController <span class="version">v2.0</span></h1>
+                <h1>PiRelay <span class="version">v2.1</span></h1>
             </div>
             <div class="header-controls">
                 <div id="connection-badge" class="badge badge-loading">
@@ -119,7 +119,8 @@
                             <div class="form-group">
                                 <label for="new-pin-mode">Pin Mode</label>
                                 <select id="new-pin-mode" required>
-                                    <option value="control">Control (Latch)</option>
+                                    <option value="control">Control (Latch/Toggle)</option>
+                                    <option value="momentary">Control (Momentary Pulse)</option>
                                     <option value="monitor">Monitor Only</option>
                                 </select>
                             </div>
@@ -128,6 +129,10 @@
                                     <input type="checkbox" id="new-pin-active-low" checked>
                                     <span class="checkbox-label">Active LOW Trigger (LOW = ON)</span>
                                 </label>
+                            </div>
+                            <div class="form-group" id="pulse-duration-group" style="display: none;">
+                                <label for="new-pin-duration">Pulse Duration (ms)</label>
+                                <input type="number" id="new-pin-duration" min="100" max="5000" placeholder="1000">
                             </div>
                         </div>
                         <button type="submit" class="btn-add-pin">Add Pin to Dashboard</button>

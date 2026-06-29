@@ -23,7 +23,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const newPinName = document.getElementById('new-pin-name');
     const newPinMode = document.getElementById('new-pin-mode');
     const newPinActiveLow = document.getElementById('new-pin-active-low');
+    const newPinDuration = document.getElementById('new-pin-duration');
     const activeLowGroup = document.getElementById('active-low-group');
+    const pulseDurationGroup = document.getElementById('pulse-duration-group');
 
     // API URL relative path
     const API_URL = 'api.php';
@@ -34,12 +36,18 @@ document.addEventListener('DOMContentLoaded', () => {
     let activePins = []; // Stores the current rendered pin configurations
     let tempPins = [];   // Stores changes inside settings modal before saving
 
-    // Toggle active-low group display based on selected mode in form
+    // Toggle form display groups based on selected mode
     newPinMode.addEventListener('change', () => {
-        if (newPinMode.value === 'control') {
+        const val = newPinMode.value;
+        if (val === 'control') {
             activeLowGroup.style.display = 'flex';
+            pulseDurationGroup.style.display = 'none';
+        } else if (val === 'momentary') {
+            activeLowGroup.style.display = 'flex';
+            pulseDurationGroup.style.display = 'flex';
         } else {
             activeLowGroup.style.display = 'none';
+            pulseDurationGroup.style.display = 'none';
         }
     });
 
@@ -68,7 +76,9 @@ document.addEventListener('DOMContentLoaded', () => {
         newPinName.value = '';
         newPinMode.value = 'control';
         newPinActiveLow.checked = true;
+        newPinDuration.value = '1000';
         activeLowGroup.style.display = 'flex';
+        pulseDurationGroup.style.display = 'none';
         
         settingsModal.classList.add('show');
         logMessage('Configuration panel opened.', 'info');
@@ -94,9 +104,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const row = document.createElement('div');
             row.className = 'config-pin-row';
             
-            const pinTypeLabel = p.mode === 'control' 
-                ? `Control (Active ${p.active_low ? 'LOW' : 'HIGH'})` 
-                : 'Monitor';
+            let pinTypeLabel = '';
+            if (p.mode === 'control') {
+                pinTypeLabel = `Control Toggle (Active ${p.active_low ? 'LOW' : 'HIGH'})`;
+            } else if (p.mode === 'momentary') {
+                pinTypeLabel = `Momentary Pulse (${p.pulse_duration || 1000}ms, Active ${p.active_low ? 'LOW' : 'HIGH'})`;
+            } else {
+                pinTypeLabel = 'Monitor';
+            }
                 
             row.innerHTML = `
                 <div class="config-pin-info">
@@ -136,6 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const pinNameStr = newPinName.value.trim();
         const pinModeStr = newPinMode.value;
         const pinActiveLow = newPinActiveLow.checked;
+        const pinDurationVal = parseInt(newPinDuration.value) || 1000;
 
         // Validation
         if (!pinNumStr || isNaN(pinNumStr) || parseInt(pinNumStr) < 1 || parseInt(pinNumStr) > 40) {
@@ -150,13 +166,23 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Append to temp array
-        tempPins.push({
+        const newPinObj = {
             pin: pinNumStr,
             name: pinNameStr || `GPIO ${pinNumStr}`,
             mode: pinModeStr,
-            active_low: pinModeStr === 'control' ? pinActiveLow : false
-        });
+            active_low: (pinModeStr === 'control' || pinModeStr === 'momentary') ? pinActiveLow : false
+        };
+
+        if (pinModeStr === 'momentary') {
+            if (pinDurationVal < 100 || pinDurationVal > 5000) {
+                alert('Pulse duration must be between 100ms and 5000ms.');
+                return;
+            }
+            newPinObj.pulse_duration = pinDurationVal;
+        }
+
+        // Append to temp array
+        tempPins.push(newPinObj);
 
         // Re-render
         renderModalPinsList();
@@ -165,6 +191,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Reset form inputs
         newPinNum.value = '';
         newPinName.value = '';
+        newPinDuration.value = '1000';
     });
 
     // Save configuration settings to the server
@@ -230,11 +257,19 @@ document.addEventListener('DOMContentLoaded', () => {
             const pinData = pinsData[pinNum];
             
             // 1. Rebuild Control Switches (Left side)
-            if (pinData.mode === 'control') {
+            if (pinData.mode === 'control' || pinData.mode === 'momentary') {
                 hasControls = true;
                 const card = document.createElement('section');
                 card.className = 'card control-card';
                 card.id = `control-card-${pinNum}`;
+                
+                const isMomentary = pinData.mode === 'momentary';
+                const buttonClass = isMomentary ? 'power-switch momentary-btn' : 'power-switch';
+                const triggerHint = isMomentary 
+                    ? `Momentary Pulse (${pinData.pulse_duration || 1000}ms)` 
+                    : `Active ${pinData.active_low ? 'LOW' : 'HIGH'} trigger`;
+                    
+                const initialStatusValue = isMomentary ? 'IDLE' : 'OFF';
                 
                 card.innerHTML = `
                     <div class="card-header">
@@ -244,7 +279,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     
                     <div class="control-body">
                         <div class="power-switch-container">
-                            <button id="toggle-btn-${pinNum}" class="power-switch" aria-label="Toggle Relay">
+                            <button id="toggle-btn-${pinNum}" class="${buttonClass}" aria-label="Toggle Relay">
                                 <div class="switch-inner">
                                     <svg class="power-icon" viewBox="0 0 24 24">
                                         <path d="M12 2v10M18.36 5.64A9 9 0 1 1 5.64 5.64" />
@@ -255,16 +290,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
                         <div class="status-indicator">
                             <span class="status-label">Current State</span>
-                            <div id="state-text-${pinNum}" class="status-value status-val-off">OFF</div>
-                            <p class="trigger-hint">Active ${pinData.active_low ? 'LOW' : 'HIGH'} trigger</p>
+                            <div id="state-text-${pinNum}" class="status-value status-val-off">${initialStatusValue}</div>
+                            <p class="trigger-hint">${triggerHint}</p>
                         </div>
                     </div>
                 `;
                 
-                // Click handler for toggle switch
-                card.querySelector(`.power-switch`).addEventListener('click', () => {
-                    togglePin(pinNum);
-                });
+                // Click handler for buttons
+                if (isMomentary) {
+                    card.querySelector(`.power-switch`).addEventListener('click', () => {
+                        pulsePin(pinNum);
+                    });
+                } else {
+                    card.querySelector(`.power-switch`).addEventListener('click', () => {
+                        togglePin(pinNum);
+                    });
+                }
                 
                 controlsSection.appendChild(card);
             }
@@ -292,7 +333,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!hasControls) {
             controlsSection.innerHTML = `
                 <div class="card loading-card">
-                    <p class="empty-state">No controls configured. Click settings gear to configure GPIO pins.</p>
+                    <p class="empty-state">No controls configured. Click settings gear to add relay switches.</p>
                 </div>
             `;
         }
@@ -320,12 +361,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const incomingPinNums = Object.keys(pinsData);
         
         // Save raw configurations to local state
-        const incomingConfig = incomingPinNums.map(pinNum => ({
-            pin: pinNum,
-            name: pinsData[pinNum].name,
-            mode: pinsData[pinNum].mode,
-            active_low: pinsData[pinNum].active_low
-        }));
+        const incomingConfig = incomingPinNums.map(pinNum => {
+            const configObj = {
+                pin: pinNum,
+                name: pinsData[pinNum].name,
+                mode: pinsData[pinNum].mode,
+                active_low: pinsData[pinNum].active_low
+            };
+            if (pinsData[pinNum].mode === 'momentary') {
+                configObj.pulse_duration = pinsData[pinNum].pulse_duration;
+            }
+            return configObj;
+        });
 
         // Check if layout needs to be rebuilt
         const configJSONStr = JSON.stringify(incomingConfig);
@@ -359,6 +406,17 @@ document.addEventListener('DOMContentLoaded', () => {
                         stateText.className = 'status-value status-val-off';
                         toggleBtn.className = 'power-switch';
                     }
+                }
+            } else if (pinData.mode === 'momentary') {
+                const toggleBtn = document.getElementById(`toggle-btn-${pinNum}`);
+                const stateText = document.getElementById(`state-text-${pinNum}`);
+                
+                // If it's momentary, the static response state is almost always IDLE/OFF.
+                // We only update if the button is not currently running a frontend pulsing animation.
+                if (stateText && toggleBtn && !toggleBtn.classList.contains('pulsing')) {
+                    stateText.textContent = 'IDLE';
+                    stateText.className = 'status-value status-val-off';
+                    toggleBtn.className = 'power-switch momentary-btn';
                 }
             }
 
@@ -424,7 +482,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Toggle specific GPIO Pin state
+    // Toggle specific GPIO Pin state (Latch mode)
     async function togglePin(pinNum) {
         if (isRequestPending) return;
         
@@ -455,6 +513,65 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             console.error('Toggle error:', error);
             logMessage(`Failed to send toggle command: ${error.message}`, 'error');
+        } finally {
+            isRequestPending = false;
+        }
+    }
+
+    // Pulse specific GPIO Pin state (Momentary mode)
+    async function pulsePin(pinNum) {
+        if (isRequestPending) return;
+        
+        const toggleBtn = document.getElementById(`toggle-btn-${pinNum}`);
+        const stateText = document.getElementById(`state-text-${pinNum}`);
+        
+        // Find config duration
+        const pinConf = activePins.find(p => p.pin === pinNum);
+        const duration = pinConf ? parseInt(pinConf.pulse_duration) || 1000 : 1000;
+        
+        // Lock UI immediately
+        if (toggleBtn && stateText) {
+            toggleBtn.classList.add('pulsing');
+            stateText.textContent = 'PULSING...';
+            stateText.className = 'status-value status-val-on';
+        }
+        
+        isRequestPending = true;
+        logMessage(`Triggering momentary pulse on GPIO ${pinNum} for ${duration}ms...`, 'info');
+        
+        try {
+            const response = await fetch(`${API_URL}?action=toggle`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ pin: pinNum })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            
+            const data = await response.json();
+            if (data.success) {
+                logMessage(`GPIO ${pinNum} pulse sequence complete.`, 'success');
+                updateDashboardUI(data);
+            } else {
+                logMessage(`Pulse failed: ${data.error || 'Server error'}`, 'error');
+                if (toggleBtn && stateText) {
+                    toggleBtn.classList.remove('pulsing');
+                    stateText.textContent = 'IDLE';
+                    stateText.className = 'status-value status-val-off';
+                }
+            }
+        } catch (error) {
+            console.error('Pulse error:', error);
+            logMessage(`Failed to trigger pulse: ${error.message}`, 'error');
+            if (toggleBtn && stateText) {
+                toggleBtn.classList.remove('pulsing');
+                stateText.textContent = 'IDLE';
+                stateText.className = 'status-value status-val-off';
+            }
         } finally {
             isRequestPending = false;
         }
