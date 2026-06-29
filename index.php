@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PiRelay - Raspberry Pi GPIO Controller</title>
+    <title>Raspberry Pi GPIO Controller</title>
     
     <!-- Google Fonts for Premium Typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -22,7 +22,7 @@
         <header class="app-header">
             <div class="logo-area">
                 <div class="pulse-ring"></div>
-                <h1>PiRelay <span class="version">v2.0</span></h1>
+                <h1>PiGPIOController <span class="version">v2.0</span></h1>
             </div>
             <div class="header-controls">
                 <div id="connection-badge" class="badge badge-loading">
