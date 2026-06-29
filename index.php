@@ -119,7 +119,7 @@
                             <div class="form-group">
                                 <label for="new-pin-mode">Pin Mode</label>
                                 <select id="new-pin-mode" required>
-                                    <option value="control">Control (Relay Switch)</option>
+                                    <option value="control">Control (Latch)</option>
                                     <option value="monitor">Monitor Only</option>
                                 </select>
                             </div>
