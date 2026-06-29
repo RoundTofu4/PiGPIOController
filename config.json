@@ -12,7 +12,7 @@
             "name": "test1",
             "mode": "momentary",
             "active_low": true,
-            "pulse_duration": 1000
+            "pulse_duration": 5000
         }
     ]
 }

@@ -521,57 +521,73 @@ document.addEventListener('DOMContentLoaded', () => {
     // Pulse specific GPIO Pin state (Momentary mode)
     async function pulsePin(pinNum) {
         if (isRequestPending) return;
-        
+
         const toggleBtn = document.getElementById(`toggle-btn-${pinNum}`);
-        const stateText = document.getElementById(`state-text-${pinNum}`);
-        
-        // Find config duration
-        const pinConf = activePins.find(p => p.pin === pinNum);
+        const stateText  = document.getElementById(`state-text-${pinNum}`);
+
+        // Find configured duration
+        const pinConf  = activePins.find(p => p.pin === pinNum);
         const duration = pinConf ? parseInt(pinConf.pulse_duration) || 1000 : 1000;
-        
+
+        // Shared helper – safe to call multiple times (idempotent)
+        const restoreIdleUI = () => {
+            if (toggleBtn) {
+                toggleBtn.classList.remove('pulsing');
+                toggleBtn.className = 'power-switch momentary-btn';
+            }
+            if (stateText) {
+                stateText.textContent = 'IDLE';
+                stateText.className   = 'status-value status-val-off';
+            }
+        };
+
         // Lock UI immediately
         if (toggleBtn && stateText) {
             toggleBtn.classList.add('pulsing');
             stateText.textContent = 'PULSING...';
-            stateText.className = 'status-value status-val-on';
+            stateText.className   = 'status-value status-val-on';
         }
-        
+
         isRequestPending = true;
         logMessage(`Triggering momentary pulse on GPIO ${pinNum} for ${duration}ms...`, 'info');
-        
+
+        // ── Guaranteed fallback timer ───────────────────────────────────────────
+        // Fires at  duration + 1500 ms  regardless of HTTP outcome.
+        // Handles: slow Pi execution, JSON parse errors, Nginx timeouts, etc.
+        // If the HTTP response arrives first, clearTimeout() cancels this timer.
+        const fallbackTimer = setTimeout(() => {
+            restoreIdleUI();
+            isRequestPending = false;
+            logMessage(`GPIO ${pinNum} UI restored via fallback timer.`, 'warning');
+        }, duration + 1500);
+        // ───────────────────────────────────────────────────────────────────────
+
         try {
             const response = await fetch(`${API_URL}?action=toggle`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ pin: pinNum })
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ pin: pinNum })
             });
-            
+
+            // HTTP response arrived – cancel the fallback, restore UI immediately
+            clearTimeout(fallbackTimer);
+            restoreIdleUI();
+
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
             }
-            
+
             const data = await response.json();
             if (data.success) {
                 logMessage(`GPIO ${pinNum} pulse sequence complete.`, 'success');
                 updateDashboardUI(data);
             } else {
                 logMessage(`Pulse failed: ${data.error || 'Server error'}`, 'error');
-                if (toggleBtn && stateText) {
-                    toggleBtn.classList.remove('pulsing');
-                    stateText.textContent = 'IDLE';
-                    stateText.className = 'status-value status-val-off';
-                }
             }
         } catch (error) {
-            console.error('Pulse error:', error);
-            logMessage(`Failed to trigger pulse: ${error.message}`, 'error');
-            if (toggleBtn && stateText) {
-                toggleBtn.classList.remove('pulsing');
-                stateText.textContent = 'IDLE';
-                stateText.className = 'status-value status-val-off';
-            }
+            clearTimeout(fallbackTimer);
+            restoreIdleUI();
+            logMessage(`Pulse error: ${error.message}`, 'error');
         } finally {
             isRequestPending = false;
         }

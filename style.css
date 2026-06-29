@@ -983,7 +983,7 @@ body {
 /* Pulsing Active State for Momentary Switch */
 .power-switch.momentary-btn.pulsing {
     border-color: var(--color-green);
-    animation: pulse-ripple 0.8s infinite cubic-bezier(0.1, 0.8, 0.3, 1);
+    animation: pulse-ripple 1s infinite cubic-bezier(0.1, 0.8, 0.3, 1);
     cursor: not-allowed;
     pointer-events: none;
     transform: scale(0.97);
