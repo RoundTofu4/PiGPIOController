@@ -3,23 +3,45 @@ document.addEventListener('DOMContentLoaded', () => {
     const connectionBadge = document.getElementById('connection-badge');
     const badgeText = connectionBadge.querySelector('.badge-text');
     
-    const relayToggleBtn = document.getElementById('relay-toggle-btn');
-    const relayStateText = document.getElementById('relay-state-text');
-    
-    const raw17 = document.getElementById('raw-17');
-    const raw18 = document.getElementById('raw-18');
-    
-    const pin17Row = document.getElementById('pin-17-row');
-    const pin18Row = document.getElementById('pin-18-row');
-    
+    const controlsSection = document.getElementById('controls-section');
+    const monitorListContainer = document.getElementById('monitor-list-container');
+    const consoleLog = document.getElementById('console-log');
     const refreshBtn = document.getElementById('refresh-btn');
     const clearLogBtn = document.getElementById('clear-log-btn');
-    const consoleLog = document.getElementById('console-log');
+
+    // Settings Modal DOM Elements
+    const settingsModal = document.getElementById('settings-modal');
+    const openSettingsBtn = document.getElementById('open-settings-btn');
+    const closeSettingsBtn = document.getElementById('close-settings-btn');
+    const cancelSettingsBtn = document.getElementById('cancel-settings-btn');
+    const saveSettingsBtn = document.getElementById('save-settings-btn');
+    const pinsConfigList = document.getElementById('pins-config-list');
+    
+    // Add Pin Form Elements
+    const addPinForm = document.getElementById('add-pin-form');
+    const newPinNum = document.getElementById('new-pin-num');
+    const newPinName = document.getElementById('new-pin-name');
+    const newPinMode = document.getElementById('new-pin-mode');
+    const newPinActiveLow = document.getElementById('new-pin-active-low');
+    const activeLowGroup = document.getElementById('active-low-group');
 
     // API URL relative path
     const API_URL = 'api.php';
     let pollingInterval = null;
     let isRequestPending = false;
+    
+    // Config state
+    let activePins = []; // Stores the current rendered pin configurations
+    let tempPins = [];   // Stores changes inside settings modal before saving
+
+    // Toggle active-low group display based on selected mode in form
+    newPinMode.addEventListener('change', () => {
+        if (newPinMode.value === 'control') {
+            activeLowGroup.style.display = 'flex';
+        } else {
+            activeLowGroup.style.display = 'none';
+        }
+    });
 
     // Helper: Add Console Log line
     function logMessage(text, type = 'info') {
@@ -30,49 +52,254 @@ document.addEventListener('DOMContentLoaded', () => {
         consoleLog.appendChild(logLine);
         consoleLog.scrollTop = consoleLog.scrollHeight;
         
-        // Keep logs under 100 entries to prevent memory leak
         while (consoleLog.childNodes.length > 100) {
             consoleLog.removeChild(consoleLog.firstChild);
         }
     }
 
-    // Update individual pin UI row
-    function updatePinRowUI(rowEl, levelEl, rawEl, pinData) {
-        if (!pinData) return;
+    // Modal Control: Open
+    openSettingsBtn.addEventListener('click', () => {
+        // Deep copy active pins to temp configuration
+        tempPins = JSON.parse(JSON.stringify(activePins));
+        renderModalPinsList();
         
-        // Update raw output
-        rawEl.textContent = pinData.raw || `No raw info`;
+        // Reset form inputs
+        newPinNum.value = '';
+        newPinName.value = '';
+        newPinMode.value = 'control';
+        newPinActiveLow.checked = true;
+        activeLowGroup.style.display = 'flex';
         
-        // Update function badge
-        const badgeEl = rowEl.querySelector('.pin-badge');
-        if (badgeEl) {
-            badgeEl.textContent = (pinData.func || 'unknown').toUpperCase();
-            if (pinData.func === 'op') {
-                badgeEl.className = 'pin-badge mode-out';
-            } else if (pinData.func === 'ip') {
-                badgeEl.className = 'pin-badge mode-in';
-            }
+        settingsModal.classList.add('show');
+        logMessage('Configuration panel opened.', 'info');
+    });
+
+    // Modal Control: Close
+    const closeModal = () => {
+        settingsModal.classList.remove('show');
+    };
+    closeSettingsBtn.addEventListener('click', closeModal);
+    cancelSettingsBtn.addEventListener('click', closeModal);
+
+    // Render configuration list in Settings Modal
+    function renderModalPinsList() {
+        pinsConfigList.innerHTML = '';
+        
+        if (tempPins.length === 0) {
+            pinsConfigList.innerHTML = '<p class="empty-state">No pins configured yet.</p>';
+            return;
         }
+
+        tempPins.forEach((p, index) => {
+            const row = document.createElement('div');
+            row.className = 'config-pin-row';
+            
+            const pinTypeLabel = p.mode === 'control' 
+                ? `Control (Active ${p.active_low ? 'LOW' : 'HIGH'})` 
+                : 'Monitor';
+                
+            row.innerHTML = `
+                <div class="config-pin-info">
+                    <span class="config-pin-badge">${p.pin}</span>
+                    <div>
+                        <div class="config-pin-name">${escapeHtml(p.name)}</div>
+                        <div style="font-size: 11px; color: var(--text-muted);">${pinTypeLabel}</div>
+                    </div>
+                </div>
+                <div class="config-pin-meta">
+                    <button type="button" class="btn-delete" data-index="${index}" title="Remove Pin">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                    </button>
+                </div>
+            `;
+            
+            // Delete button action listener
+            row.querySelector('.btn-delete').addEventListener('click', (e) => {
+                const idx = parseInt(e.currentTarget.getAttribute('data-index'));
+                const removedPin = tempPins[idx];
+                tempPins.splice(idx, 1);
+                renderModalPinsList();
+                logMessage(`Pin GPIO ${removedPin.pin} removed from temp configuration.`, 'warning');
+            });
+            
+            pinsConfigList.appendChild(row);
+        });
+    }
+
+    // Add New Pin to the temporary list in modal
+    addPinForm.addEventListener('submit', (e) => {
+        e.preventDefault();
         
-        // Update level indicator
-        const lvl = pinData.level || 'unknown';
-        const levelTextEl = rowEl.querySelector('.pin-level');
-        if (levelTextEl) {
-            if (lvl === 'hi') {
-                levelTextEl.textContent = 'HIGH (3.3V)';
-                levelTextEl.className = 'pin-level level-high';
-            } else if (lvl === 'lo') {
-                levelTextEl.textContent = 'LOW (0V)';
-                levelTextEl.className = 'pin-level level-low';
-            } else {
-                levelTextEl.textContent = 'UNKNOWN';
-                levelTextEl.className = 'pin-level level-unknown';
+        const pinNumStr = newPinNum.value.trim();
+        const pinNameStr = newPinName.value.trim();
+        const pinModeStr = newPinMode.value;
+        const pinActiveLow = newPinActiveLow.checked;
+
+        // Validation
+        if (!pinNumStr || isNaN(pinNumStr) || parseInt(pinNumStr) < 1 || parseInt(pinNumStr) > 40) {
+            alert('Pin number must be a valid number between 1 and 40.');
+            return;
+        }
+
+        // Check duplicates
+        const exists = tempPins.some(p => p.pin === pinNumStr);
+        if (exists) {
+            alert(`GPIO Pin ${pinNumStr} is already added to the list.`);
+            return;
+        }
+
+        // Append to temp array
+        tempPins.push({
+            pin: pinNumStr,
+            name: pinNameStr || `GPIO ${pinNumStr}`,
+            mode: pinModeStr,
+            active_low: pinModeStr === 'control' ? pinActiveLow : false
+        });
+
+        // Re-render
+        renderModalPinsList();
+        logMessage(`Added GPIO ${pinNumStr} (${pinNameStr}) to config list.`, 'info');
+        
+        // Reset form inputs
+        newPinNum.value = '';
+        newPinName.value = '';
+    });
+
+    // Save configuration settings to the server
+    saveSettingsBtn.addEventListener('click', async () => {
+        saveSettingsBtn.disabled = true;
+        saveSettingsBtn.textContent = 'Saving...';
+        
+        try {
+            const response = await fetch(`${API_URL}?action=save_config`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ pins: tempPins })
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
             }
+
+            const data = await response.json();
+            if (data.success) {
+                logMessage('Configuration saved successfully to server.', 'success');
+                closeModal();
+                // Force full re-render of dashboard
+                activePins = []; 
+                updateDashboardUI(data);
+            } else {
+                alert(`Failed to save configuration: ${data.error}`);
+                logMessage(`Save configuration error: ${data.error}`, 'error');
+            }
+        } catch (error) {
+            console.error('Save config error:', error);
+            alert(`Network error saving configuration: ${error.message}`);
+            logMessage(`Failed to save configuration: ${error.message}`, 'error');
+        } finally {
+            saveSettingsBtn.disabled = false;
+            saveSettingsBtn.textContent = 'Save Configuration';
+        }
+    });
+
+    // Re-create DOM elements only when the pin list configuration changes
+    function rebuildDashboardLayout(pinsData) {
+        // Clear containers
+        controlsSection.innerHTML = '';
+        monitorListContainer.innerHTML = '';
+
+        const pinKeys = Object.keys(pinsData);
+        
+        if (pinKeys.length === 0) {
+            controlsSection.innerHTML = `
+                <div class="card loading-card">
+                    <p class="empty-state">No controls configured. Click settings gear to add pins.</p>
+                </div>
+            `;
+            monitorListContainer.innerHTML = '<p class="empty-state">No pins to monitor.</p>';
+            return;
+        }
+
+        let hasControls = false;
+
+        pinKeys.forEach(pinNum => {
+            const pinData = pinsData[pinNum];
+            
+            // 1. Rebuild Control Switches (Left side)
+            if (pinData.mode === 'control') {
+                hasControls = true;
+                const card = document.createElement('section');
+                card.className = 'card control-card';
+                card.id = `control-card-${pinNum}`;
+                
+                card.innerHTML = `
+                    <div class="card-header">
+                        <h2>${escapeHtml(pinData.name)}</h2>
+                        <span class="pin-hint">GPIO ${pinNum}</span>
+                    </div>
+                    
+                    <div class="control-body">
+                        <div class="power-switch-container">
+                            <button id="toggle-btn-${pinNum}" class="power-switch" aria-label="Toggle Relay">
+                                <div class="switch-inner">
+                                    <svg class="power-icon" viewBox="0 0 24 24">
+                                        <path d="M12 2v10M18.36 5.64A9 9 0 1 1 5.64 5.64" />
+                                    </svg>
+                                </div>
+                            </button>
+                        </div>
+
+                        <div class="status-indicator">
+                            <span class="status-label">Current State</span>
+                            <div id="state-text-${pinNum}" class="status-value status-val-off">OFF</div>
+                            <p class="trigger-hint">Active ${pinData.active_low ? 'LOW' : 'HIGH'} trigger</p>
+                        </div>
+                    </div>
+                `;
+                
+                // Click handler for toggle switch
+                card.querySelector(`.power-switch`).addEventListener('click', () => {
+                    togglePin(pinNum);
+                });
+                
+                controlsSection.appendChild(card);
+            }
+
+            // 2. Rebuild Monitor Pin rows (Right side)
+            const pinRow = document.createElement('div');
+            pinRow.className = 'pin-row';
+            pinRow.id = `pin-row-${pinNum}`;
+            
+            pinRow.innerHTML = `
+                <div class="pin-meta">
+                    <span class="pin-num">${pinNum}</span>
+                    <span class="pin-name">${escapeHtml(pinData.name)}</span>
+                </div>
+                <div class="pin-data">
+                    <span class="pin-badge" id="mode-badge-${pinNum}">---</span>
+                    <span class="pin-level level-unknown" id="level-badge-${pinNum}">---</span>
+                </div>
+                <div class="raw-console">pinctrl get ${pinNum}: <code id="raw-text-${pinNum}">Loading...</code></div>
+            `;
+            
+            monitorListContainer.appendChild(pinRow);
+        });
+
+        if (!hasControls) {
+            controlsSection.innerHTML = `
+                <div class="card loading-card">
+                    <p class="empty-state">No controls configured. Click settings gear to add relay switches.</p>
+                </div>
+            `;
         }
     }
 
-    // Process status response data and update all UI elements
-    function updateUI(data) {
+    // Flicker-free status updates to already rendered DOM elements
+    function updateDashboardUI(data) {
         if (!data || !data.success) {
             logMessage('API reported error: ' + (data.error || 'Unknown error'), 'error');
             return;
@@ -89,26 +316,87 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
-        // 2. Relay Button State Update
-        const relayStatus = data.relay_status; // "ON" or "OFF"
-        relayStateText.textContent = relayStatus;
+        const pinsData = data.pins || {};
+        const incomingPinNums = Object.keys(pinsData);
         
-        if (relayStatus === 'ON') {
-            relayStateText.className = 'status-value status-val-on';
-            relayToggleBtn.className = 'power-switch switch-on';
-        } else if (relayStatus === 'OFF') {
-            relayStateText.className = 'status-value status-val-off';
-            relayToggleBtn.className = 'power-switch switch-off';
-        } else {
-            relayStateText.className = 'status-value status-val-off';
-            relayToggleBtn.className = 'power-switch';
+        // Save raw configurations to local state
+        const incomingConfig = incomingPinNums.map(pinNum => ({
+            pin: pinNum,
+            name: pinsData[pinNum].name,
+            mode: pinsData[pinNum].mode,
+            active_low: pinsData[pinNum].active_low
+        }));
+
+        // Check if layout needs to be rebuilt
+        const configJSONStr = JSON.stringify(incomingConfig);
+        const activeJSONStr = JSON.stringify(activePins);
+        
+        if (configJSONStr !== activeJSONStr) {
+            logMessage('Updating dashboard layout...', 'info');
+            rebuildDashboardLayout(pinsData);
+            activePins = incomingConfig;
         }
 
-        // 3. Pin Monitor Update
-        if (data.pins) {
-            updatePinRowUI(pin17Row, null, raw17, data.pins['17']);
-            updatePinRowUI(pin18Row, null, raw18, data.pins['18']);
-        }
+        // 2. Perform element value updates (No flicker)
+        incomingPinNums.forEach(pinNum => {
+            const pinData = pinsData[pinNum];
+            
+            // A. Update Control Elements if applicable
+            if (pinData.mode === 'control') {
+                const toggleBtn = document.getElementById(`toggle-btn-${pinNum}`);
+                const stateText = document.getElementById(`state-text-${pinNum}`);
+                const relayStatus = pinData.status; // "ON" or "OFF"
+                
+                if (stateText && toggleBtn) {
+                    stateText.textContent = relayStatus;
+                    if (relayStatus === 'ON') {
+                        stateText.className = 'status-value status-val-on';
+                        toggleBtn.className = 'power-switch switch-on';
+                    } else if (relayStatus === 'OFF') {
+                        stateText.className = 'status-value status-val-off';
+                        toggleBtn.className = 'power-switch switch-off';
+                    } else {
+                        stateText.className = 'status-value status-val-off';
+                        toggleBtn.className = 'power-switch';
+                    }
+                }
+            }
+
+            // B. Update Monitor Elements
+            const modeBadge = document.getElementById(`mode-badge-${pinNum}`);
+            const levelBadge = document.getElementById(`level-badge-${pinNum}`);
+            const rawText = document.getElementById(`raw-text-${pinNum}`);
+
+            if (modeBadge) {
+                const func = (pinData.func || 'unknown').toUpperCase();
+                modeBadge.textContent = func;
+                if (pinData.func === 'op') {
+                    modeBadge.className = 'pin-badge mode-out';
+                } else if (pinData.func === 'ip') {
+                    modeBadge.className = 'pin-badge mode-in';
+                } else {
+                    modeBadge.className = 'pin-badge';
+                }
+            }
+
+            if (levelBadge) {
+                const lvl = pinData.level || 'unknown';
+                if (lvl === 'hi') {
+                    levelBadge.textContent = 'HIGH (3.3V)';
+                    levelBadge.className = 'pin-level level-high';
+                } else if (lvl === 'lo') {
+                    levelBadge.textContent = 'LOW (0V)';
+                    levelBadge.className = 'pin-level level-low';
+                } else {
+                    levelBadge.textContent = 'UNKNOWN';
+                    levelBadge.className = 'pin-level level-unknown';
+                }
+            }
+
+            if (rawText) {
+                rawText.textContent = pinData.raw || 'No raw command response';
+            }
+        });
     }
 
     // Fetch Status from PHP backend
@@ -122,9 +410,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error(`HTTP ${response.status}`);
             }
             const data = await response.json();
-            updateUI(data);
+            updateDashboardUI(data);
             if (!isSilent) {
-                logMessage(`Status updated successfully. Mode: ${data.mode}`, 'success');
+                logMessage(`Status fetched successfully.`, 'success');
             }
         } catch (error) {
             console.error('Fetch error:', error);
@@ -136,19 +424,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Toggle Relay state
-    async function toggleRelay() {
+    // Toggle specific GPIO Pin state
+    async function togglePin(pinNum) {
         if (isRequestPending) return;
         
         isRequestPending = true;
-        logMessage('Sending toggle request...', 'info');
+        logMessage(`Toggling pin GPIO ${pinNum}...`, 'info');
         
         try {
             const response = await fetch(`${API_URL}?action=toggle`, {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                }
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ pin: pinNum })
             });
             
             if (!response.ok) {
@@ -157,8 +446,9 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const data = await response.json();
             if (data.success) {
-                updateUI(data);
-                logMessage(`Relay toggled: now ${data.relay_status}`, 'success');
+                updateDashboardUI(data);
+                const updatedPin = data.pins[pinNum];
+                logMessage(`GPIO ${pinNum} (${updatedPin.name}) toggled: now ${updatedPin.status}`, 'success');
             } else {
                 logMessage(`Toggle failed: ${data.error || 'Server error'}`, 'error');
             }
@@ -170,9 +460,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Helper to escape HTML characters
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
     // Event Listeners
-    relayToggleBtn.addEventListener('click', toggleRelay);
-    
     refreshBtn.addEventListener('click', () => {
         logMessage('Manual refresh triggered...', 'info');
         fetchStatus(false);

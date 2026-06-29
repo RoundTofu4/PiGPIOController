@@ -22,43 +22,32 @@
         <header class="app-header">
             <div class="logo-area">
                 <div class="pulse-ring"></div>
-                <h1>PiRelay <span class="version">v1.0</span></h1>
+                <h1>PiRelay <span class="version">v2.0</span></h1>
             </div>
-            <div id="connection-badge" class="badge badge-loading">
-                <span class="badge-dot"></span>
-                <span class="badge-text">Connecting...</span>
+            <div class="header-controls">
+                <div id="connection-badge" class="badge badge-loading">
+                    <span class="badge-dot"></span>
+                    <span class="badge-text">Connecting...</span>
+                </div>
+                <button id="open-settings-btn" class="btn-settings" title="Configuration Settings">
+                    <svg viewBox="0 0 24 24" width="20" height="20">
+                        <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+                        <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/>
+                    </svg>
+                </button>
             </div>
         </header>
 
         <!-- Main Dashboard -->
         <main class="dashboard-grid">
             
-            <!-- Relay Control Card -->
-            <section class="card control-card">
-                <div class="card-header">
-                    <h2>Relay Control</h2>
-                    <span class="pin-hint">GPIO 17</span>
+            <!-- Relay Controls Container (Dynamic list of control switches) -->
+            <div id="controls-section" class="controls-wrapper">
+                <!-- Dynamically populated control cards will go here -->
+                <div id="controls-loader" class="card loading-card">
+                    <p>Loading relay controls...</p>
                 </div>
-                
-                <div class="control-body">
-                    <!-- High-End Toggle Switch -->
-                    <div class="power-switch-container">
-                        <button id="relay-toggle-btn" class="power-switch" aria-label="Toggle Relay">
-                            <div class="switch-inner">
-                                <svg class="power-icon" viewBox="0 0 24 24">
-                                    <path d="M12 2v10M18.36 5.64A9 9 0 1 1 5.64 5.64" />
-                                </svg>
-                            </div>
-                        </button>
-                    </div>
-
-                    <div class="status-indicator">
-                        <span class="status-label">Current State</span>
-                        <div id="relay-state-text" class="status-value status-val-off">OFF</div>
-                        <p class="trigger-hint">Low-level trigger (Active LOW)</p>
-                    </div>
-                </div>
-            </section>
+            </div>
 
             <!-- GPIO Monitoring Card -->
             <section class="card monitor-card">
@@ -71,32 +60,9 @@
                     </button>
                 </div>
                 
-                <div class="monitor-body">
-                    <!-- GPIO 17 Monitor Detail -->
-                    <div class="pin-row" id="pin-17-row">
-                        <div class="pin-meta">
-                            <span class="pin-num">17</span>
-                            <span class="pin-name">Relay Pin</span>
-                        </div>
-                        <div class="pin-data">
-                            <span class="pin-badge mode-out">OUTPUT</span>
-                            <span class="pin-level level-unknown">---</span>
-                        </div>
-                        <div class="raw-console">pinctrl get 17: <code id="raw-17">Loading...</code></div>
-                    </div>
-
-                    <!-- GPIO 18 Monitor Detail -->
-                    <div class="pin-row" id="pin-18-row">
-                        <div class="pin-meta">
-                            <span class="pin-num">18</span>
-                            <span class="pin-name">Feedback/Input</span>
-                        </div>
-                        <div class="pin-data">
-                            <span class="pin-badge mode-in">INPUT</span>
-                            <span class="pin-level level-unknown">---</span>
-                        </div>
-                        <div class="raw-console">pinctrl get 18: <code id="raw-18">Loading...</code></div>
-                    </div>
+                <!-- Monitor list dynamically populated -->
+                <div class="monitor-body" id="monitor-list-container">
+                    <p class="empty-state">Loading status list...</p>
                 </div>
             </section>
 
@@ -107,7 +73,7 @@
                     <button id="clear-log-btn" class="btn-clear">Clear</button>
                 </div>
                 <div class="console-body" id="console-log">
-                    <div class="log-line log-info">System initialized. Awaiting API connection...</div>
+                    <div class="log-line log-info">System initialized. Loading configuration...</div>
                 </div>
             </section>
 
@@ -116,6 +82,64 @@
         <footer class="app-footer">
             <p>Designed for Raspberry Pi 3B &bull; Built with PHP &amp; Vanilla JS</p>
         </footer>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal-backdrop">
+        <div class="modal-content glass">
+            <div class="modal-header">
+                <h2>GPIO Pin Configuration</h2>
+                <button id="close-settings-btn" class="btn-close" title="Close Settings">&times;</button>
+            </div>
+            
+            <div class="modal-body">
+                <!-- Active Pins List -->
+                <section class="settings-section">
+                    <h3>Active GPIO Pins</h3>
+                    <div class="pins-config-list" id="pins-config-list">
+                        <!-- Populated by script -->
+                    </div>
+                </section>
+                
+                <!-- Add Pin Form -->
+                <section class="settings-section">
+                    <h3>Add New GPIO Pin</h3>
+                    <form id="add-pin-form" class="settings-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="new-pin-num">GPIO Pin Number</label>
+                                <input type="number" id="new-pin-num" min="1" max="40" placeholder="e.g. 22" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="new-pin-name">Custom Label</label>
+                                <input type="text" id="new-pin-name" placeholder="e.g. Lampu Teras" required>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="new-pin-mode">Pin Mode</label>
+                                <select id="new-pin-mode" required>
+                                    <option value="control">Control (Relay Switch)</option>
+                                    <option value="monitor">Monitor Only</option>
+                                </select>
+                            </div>
+                            <div class="form-group form-checkbox-group" id="active-low-group">
+                                <label class="checkbox-container">
+                                    <input type="checkbox" id="new-pin-active-low" checked>
+                                    <span class="checkbox-label">Active LOW Trigger (LOW = ON)</span>
+                                </label>
+                            </div>
+                        </div>
+                        <button type="submit" class="btn-add-pin">Add Pin to Dashboard</button>
+                    </form>
+                </section>
+            </div>
+            
+            <div class="modal-footer">
+                <button id="cancel-settings-btn" class="btn-cancel">Close</button>
+                <button id="save-settings-btn" class="btn-save">Save Configuration</button>
+            </div>
+        </div>
     </div>
 </body>
 </html>

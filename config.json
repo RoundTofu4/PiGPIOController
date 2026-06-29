@@ -1,0 +1,10 @@
+{
+    "pins": [
+        {
+            "pin": "17",
+            "name": "STB Armbian",
+            "mode": "control",
+            "active_low": true
+        }
+    ]
+}

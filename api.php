@@ -1,7 +1,7 @@
 <?php
 /**
- * Raspberry Pi GPIO 17 Relay Controller API
- * Supports real pinctrl execution on Raspberry Pi and automatic Mock Mode on laptop.
+ * Raspberry Pi GPIO Relay Controller API - Dynamic Version
+ * Supports dynamic configuration via config.json, real pinctrl execution, and laptop mocking.
  */
 
 header('Content-Type: application/json');
@@ -15,6 +15,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 // Configuration
 define('PINCTRL_CMD', 'pinctrl'); // Modify to 'sudo pinctrl' if permissions require it
+define('CONFIG_FILE', __DIR__ . '/config.json');
 define('MOCK_FILE', __DIR__ . '/mock_state.json');
 
 // Check if pinctrl is available
@@ -26,17 +27,83 @@ if ($return_var === 0) {
     $is_real_pi = true;
 }
 
-// Helper to get mock state
-function get_mock_state() {
-    if (!file_exists(MOCK_FILE)) {
-        $initial_state = [
-            '17' => ['func' => 'op', 'level' => 'hi', 'raw' => '17: op dh pd | hi (Mocked)'], // Default relay OFF (low trigger, so hi = off)
-            '18' => ['func' => 'ip', 'level' => 'lo', 'raw' => '18: ip pd | lo (Mocked)']
+// Helper to get configuration
+function get_pin_config() {
+    if (!file_exists(CONFIG_FILE)) {
+        $default_config = [
+            'pins' => [
+                [
+                    'pin' => '17',
+                    'name' => 'Lampu 1',
+                    'mode' => 'control',
+                    'active_low' => true
+                ],
+                [
+                    'pin' => '18',
+                    'name' => 'Feedback Sensor',
+                    'mode' => 'monitor',
+                    'active_low' => false
+                ]
+            ]
         ];
-        file_put_contents(MOCK_FILE, json_encode($initial_state, JSON_PRETTY_PRINT));
-        return $initial_state;
+        file_put_contents(CONFIG_FILE, json_encode($default_config, JSON_PRETTY_PRINT));
+        return $default_config;
     }
-    return json_decode(file_get_contents(MOCK_FILE), true);
+    $config = json_decode(file_get_contents(CONFIG_FILE), true);
+    if (!isset($config['pins']) || !is_array($config['pins'])) {
+        return ['pins' => []];
+    }
+    return $config;
+}
+
+// Helper to save configuration
+function save_pin_config($config) {
+    return file_put_contents(CONFIG_FILE, json_encode($config, JSON_PRETTY_PRINT)) !== false;
+}
+
+// Helper to get mock state
+function get_mock_state($pins_config) {
+    $mock_state = [];
+    if (file_exists(MOCK_FILE)) {
+        $mock_state = json_decode(file_get_contents(MOCK_FILE), true);
+    }
+    
+    // Synchronize mock_state with current pins_config
+    $updated = false;
+    $active_pins = [];
+    
+    foreach ($pins_config['pins'] as $p) {
+        $pin_num = $p['pin'];
+        $active_pins[] = $pin_num;
+        
+        if (!isset($mock_state[$pin_num])) {
+            // Initialize new mock pin
+            $def_level = ($p['mode'] === 'control' && $p['active_low']) ? 'hi' : 'lo'; // hi means relay off initially if active_low
+            $def_func = ($p['mode'] === 'control') ? 'op' : 'ip';
+            $dir_val = ($def_level === 'hi') ? 'dh' : 'dl';
+            $mock_state[$pin_num] = [
+                'pin' => $pin_num,
+                'func' => $def_func,
+                'level' => $def_level,
+                'raw' => "{$pin_num}: {$def_func} {$dir_val} pd | {$def_level} (Mocked)"
+            ];
+            $updated = true;
+        }
+    }
+    
+    // Remove pins from mock state that are no longer in configuration
+    foreach ($mock_state as $pin_num => $data) {
+        if (!in_array($pin_num, $active_pins)) {
+            unset($mock_state[$pin_num]);
+            $updated = true;
+        }
+    }
+    
+    if ($updated) {
+        file_put_contents(MOCK_FILE, json_encode($mock_state, JSON_PRETTY_PRINT));
+    }
+    
+    return $mock_state;
 }
 
 // Helper to save mock state
@@ -91,38 +158,70 @@ function parse_pinctrl_line($line) {
     ];
 }
 
-// Get status of pins 17 and 18
-function get_pins_status($is_real_pi) {
+// Get status of configured pins
+function get_pins_status($config, $is_real_pi) {
     if ($is_real_pi) {
         $status = [];
-        foreach ([17, 18] as $pin) {
+        foreach ($config['pins'] as $p) {
+            $pin = $p['pin'];
             $output = [];
-            $cmd = PINCTRL_CMD . ' get ' . $pin;
+            $cmd = PINCTRL_CMD . ' get ' . (int)$pin;
             @exec($cmd . ' 2>&1', $output);
             
             $line = isset($output[0]) ? $output[0] : '';
             $parsed = parse_pinctrl_line($line);
             
             if ($parsed) {
-                $status[$pin] = $parsed;
+                // If it parsed, merge it with configuration details (name, mode, active_low)
+                $status[$pin] = array_merge($p, $parsed);
             } else {
-                $status[$pin] = [
-                    'pin' => (string)$pin,
+                $status[$pin] = array_merge($p, [
                     'func' => 'unknown',
                     'level' => 'unknown',
                     'raw' => !empty($line) ? $line : "Error running command: $cmd"
-                ];
+                ]);
+            }
+            
+            // Calculate active state for controls
+            if ($p['mode'] === 'control') {
+                $lvl = $status[$pin]['level'];
+                if ($lvl === 'unknown') {
+                    $status[$pin]['status'] = 'UNKNOWN';
+                } else {
+                    $isOn = $p['active_low'] ? ($lvl === 'lo') : ($lvl === 'hi');
+                    $status[$pin]['status'] = $isOn ? 'ON' : 'OFF';
+                }
             }
         }
         return $status;
     } else {
-        return get_mock_state();
+        $mock_state = get_mock_state($config);
+        $status = [];
+        foreach ($config['pins'] as $p) {
+            $pin = $p['pin'];
+            $mock_pin_data = isset($mock_state[$pin]) ? $mock_state[$pin] : [
+                'pin' => $pin,
+                'func' => ($p['mode'] === 'control') ? 'op' : 'ip',
+                'level' => ($p['mode'] === 'control' && $p['active_low']) ? 'hi' : 'lo',
+                'raw' => "{$pin}: op | (Mocked Default)"
+            ];
+            
+            $status[$pin] = array_merge($p, $mock_pin_data);
+            
+            // Calculate active state for controls
+            if ($p['mode'] === 'control') {
+                $lvl = $status[$pin]['level'];
+                $isOn = $p['active_low'] ? ($lvl === 'lo') : ($lvl === 'hi');
+                $status[$pin]['status'] = $isOn ? 'ON' : 'OFF';
+            }
+        }
+        return $status;
     }
 }
 
 // Execute command to set pin state
-function set_pin_state($pin, $level, $is_real_pi) {
-    // For GPIO 17: op dh (high = relay OFF), op dl (low = relay ON)
+function set_pin_state($pin, $level, $is_real_pi, $config) {
+    // For active output setup: op dh or op dl
     $dir_val = ($level === 'hi') ? 'dh' : 'dl';
     
     if ($is_real_pi) {
@@ -132,7 +231,7 @@ function set_pin_state($pin, $level, $is_real_pi) {
         @exec($cmd . ' 2>&1', $output, $return_var);
         return $return_var === 0;
     } else {
-        $state = get_mock_state();
+        $state = get_mock_state($config);
         if (isset($state[$pin])) {
             $state[$pin]['func'] = 'op';
             $state[$pin]['level'] = $level;
@@ -146,89 +245,148 @@ function set_pin_state($pin, $level, $is_real_pi) {
 
 // Router actions
 $action = isset($_GET['action']) ? $_GET['action'] : 'status';
+$config = get_pin_config();
 
 if ($action === 'status') {
-    $pins = get_pins_status($is_real_pi);
-    
-    // Determine relay status based on low level trigger
-    // LOW (lo) = Relay ON, HIGH (hi) = Relay OFF
-    $relay_level = isset($pins['17']['level']) ? $pins['17']['level'] : 'unknown';
-    $relay_state = 'UNKNOWN';
-    if ($relay_level === 'lo') {
-        $relay_state = 'ON';
-    } elseif ($relay_level === 'hi') {
-        $relay_state = 'OFF';
-    }
+    $pins = get_pins_status($config, $is_real_pi);
     
     echo json_encode([
         'success' => true,
         'mode' => $is_real_pi ? 'Raspberry Pi (Real)' : 'Laptop (Mock Mode)',
-        'relay_status' => $relay_state,
         'pins' => $pins
     ]);
     exit;
 }
 
 if ($action === 'toggle' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Get current state
-    $pins = get_pins_status($is_real_pi);
-    $current_level = isset($pins['17']['level']) ? $pins['17']['level'] : 'hi';
+    $pin = isset($_POST['pin']) ? $_POST['pin'] : '';
     
-    // Toggle state: if hi (OFF), turn lo (ON). If lo (ON), turn hi (OFF).
-    $next_level = ($current_level === 'lo') ? 'hi' : 'lo';
-    
-    $success = set_pin_state(17, $next_level, $is_real_pi);
-    
-    // If mock mode, let's also randomly simulate a toggle on GPIO 18 sometimes to show it working
-    if (!$is_real_pi) {
-        $state = get_mock_state();
-        if (rand(1, 10) > 7) { // 30% chance to toggle input pin 18 for demo purposes
-            $next_18_level = ($state['18']['level'] === 'lo') ? 'hi' : 'lo';
-            $state['18']['level'] = $next_18_level;
-            $state['18']['raw'] = "18: ip pd | {$next_18_level} (Mocked)";
-            save_mock_state($state);
+    if (empty($pin)) {
+        // Fallback to reading JSON input if content-type is json
+        $raw_input = file_get_contents('php://input');
+        $json_data = json_decode($raw_input, true);
+        if (isset($json_data['pin'])) {
+            $pin = $json_data['pin'];
         }
     }
     
-    // Fetch fresh status
-    $pins = get_pins_status($is_real_pi);
-    $relay_level = isset($pins['17']['level']) ? $pins['17']['level'] : 'unknown';
-    $relay_state = 'UNKNOWN';
-    if ($relay_level === 'lo') {
-        $relay_state = 'ON';
-    } elseif ($relay_level === 'hi') {
-        $relay_state = 'OFF';
+    if (empty($pin)) {
+        echo json_encode(['success' => false, 'error' => 'Pin parameter missing']);
+        exit;
     }
+    
+    // Find configuration for this pin
+    $pin_conf = null;
+    foreach ($config['pins'] as $p) {
+        if ($p['pin'] === (string)$pin) {
+            $pin_conf = $p;
+            break;
+        }
+    }
+    
+    if (!$pin_conf || $pin_conf['mode'] !== 'control') {
+        echo json_encode(['success' => false, 'error' => 'Pin is not configured for control']);
+        exit;
+    }
+    
+    $pins = get_pins_status($config, $is_real_pi);
+    $current_level = isset($pins[$pin]['level']) ? $pins[$pin]['level'] : 'hi';
+    
+    // Toggle level: if lo -> hi, if hi -> lo
+    $next_level = ($current_level === 'lo') ? 'hi' : 'lo';
+    
+    $success = set_pin_state($pin, $next_level, $is_real_pi, $config);
+    
+    // For mock mode: also randomly toggle any monitor pins to simulate sensory feedback changes
+    if (!$is_real_pi) {
+        $state = get_mock_state($config);
+        foreach ($config['pins'] as $p) {
+            if ($p['mode'] === 'monitor' && rand(1, 10) > 7) {
+                $pin_m = $p['pin'];
+                if (isset($state[$pin_m])) {
+                    $next_m_level = ($state[$pin_m]['level'] === 'lo') ? 'hi' : 'lo';
+                    $state[$pin_m]['level'] = $next_m_level;
+                    $state[$pin_m]['raw'] = "{$pin_m}: ip pd | {$next_m_level} (Mocked)";
+                }
+            }
+        }
+        save_mock_state($state);
+    }
+    
+    // Fetch updated statuses
+    $pins = get_pins_status($config, $is_real_pi);
     
     echo json_encode([
         'success' => $success,
         'mode' => $is_real_pi ? 'Raspberry Pi (Real)' : 'Laptop (Mock Mode)',
-        'relay_status' => $relay_state,
         'pins' => $pins
     ]);
     exit;
 }
 
-// Specific controls (useful for direct button mapping)
-if (($action === 'on' || $action === 'off') && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    $target_level = ($action === 'on') ? 'lo' : 'hi'; // Low-level trigger: ON is lo, OFF is hi
-    $success = set_pin_state(17, $target_level, $is_real_pi);
+if ($action === 'save_config' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $raw_input = file_get_contents('php://input');
+    $json_data = json_decode($raw_input, true);
     
-    $pins = get_pins_status($is_real_pi);
-    $relay_level = isset($pins['17']['level']) ? $pins['17']['level'] : 'unknown';
-    $relay_state = 'UNKNOWN';
-    if ($relay_level === 'lo') {
-        $relay_state = 'ON';
-    } elseif ($relay_level === 'hi') {
-        $relay_state = 'OFF';
+    if (!isset($json_data['pins']) || !is_array($json_data['pins'])) {
+        echo json_encode(['success' => false, 'error' => 'Invalid configuration data format']);
+        exit;
     }
     
-    echo json_encode([
-        'success' => $success,
-        'mode' => $is_real_pi ? 'Raspberry Pi (Real)' : 'Laptop (Mock Mode)',
-        'relay_status' => $relay_state,
-        'pins' => $pins
-    ]);
+    $validated_pins = [];
+    $existing_pins = [];
+    
+    foreach ($json_data['pins'] as $p) {
+        if (!isset($p['pin']) || !isset($p['name']) || !isset($p['mode'])) {
+            echo json_encode(['success' => false, 'error' => 'Each pin must have a number, name, and mode']);
+            exit;
+        }
+        
+        $pin_num = trim($p['pin']);
+        if (!is_numeric($pin_num) || (int)$pin_num < 1 || (int)$pin_num > 40) {
+            echo json_encode(['success' => false, 'error' => "Invalid GPIO pin number: {$pin_num}. Must be between 1 and 40."]);
+            exit;
+        }
+        
+        if (in_array($pin_num, $existing_pins)) {
+            echo json_encode(['success' => false, 'error' => "Duplicate configuration for GPIO Pin {$pin_num}."]);
+            exit;
+        }
+        $existing_pins[] = $pin_num;
+        
+        $name = trim($p['name']);
+        if (empty($name)) {
+            $name = "GPIO " . $pin_num;
+        }
+        
+        $mode = $p['mode'] === 'control' ? 'control' : 'monitor';
+        $active_low = isset($p['active_low']) ? (bool)$p['active_low'] : false;
+        
+        $validated_pins[] = [
+            'pin' => (string)$pin_num,
+            'name' => $name,
+            'mode' => $mode,
+            'active_low' => $active_low
+        ];
+    }
+    
+    $new_config = ['pins' => $validated_pins];
+    $success = save_pin_config($new_config);
+    
+    if ($success) {
+        // Force synchronization of mock file if we are in mock mode
+        if (!$is_real_pi) {
+            get_mock_state($new_config);
+        }
+        
+        echo json_encode([
+            'success' => true,
+            'message' => 'Configuration saved successfully',
+            'pins' => get_pins_status($new_config, $is_real_pi)
+        ]);
+    } else {
+        echo json_encode(['success' => false, 'error' => 'Failed to write configuration file']);
+    }
     exit;
 }
 
