@@ -1,4 +1,4 @@
-# PiRelay - Raspberry Pi GPIO Relay Controller
+# PiGPIOController - Raspberry Pi GPIO Controller
 
 A sleek, responsive, glassmorphic dark-theme web dashboard for controlling GPIO and monitoring status pins of a Raspberry Pi 3B.
 
@@ -29,7 +29,7 @@ To test the application on your laptop (which will run in **Mock Mode**):
    ```
    http://localhost:8000
    ```
-4. Click the power button to toggle the mock relay state. You will see activity logged in the UI's Console Log.
+4. Click the power button to toggle the mock pin state. You will see activity logged in the UI's Console Log.
 
 ---
 
@@ -45,12 +45,12 @@ sudo apt install -y nginx php-fpm php-cli
 ### Step 2: Copy Files
 Move the workspace files to the default web directory on your Pi:
 ```bash
-sudo mkdir -p /var/www/html/pirelay
-sudo cp -r * /var/www/html/pirelay/
+sudo mkdir -p /var/www/html/PiGPIOController
+sudo cp -r * /var/www/html/PiGPIOController/
 ```
 Ensure correct ownership:
 ```bash
-sudo chown -R www-data:www-data /var/www/html/pirelay
+sudo chown -R www-data:www-data /var/www/html/PiGPIOController
 ```
 
 ### Step 3: Configure GPIO Permissions (CRITICAL)
@@ -79,7 +79,7 @@ If your system requires root privileges for `pinctrl`, configure passwordless su
    ```text
    www-data ALL=(ALL) NOPASSWD: /usr/bin/pinctrl
    ```
-3. Open `/var/www/html/pirelay/api.php` and change the configuration constant at the top:
+3. Open `/var/www/html/PiGPIOController/api.php` and change the configuration constant at the top:
    ```php
    define('PINCTRL_CMD', 'sudo pinctrl');
    ```
@@ -87,7 +87,7 @@ If your system requires root privileges for `pinctrl`, configure passwordless su
 ### Step 4: Configure Nginx Site
 Create an Nginx configuration file or modify the default one to serve PHP:
 ```bash
-sudo nano /etc/nginx/sites-available/pirelay
+sudo nano /etc/nginx/sites-available/PiGPIOController
 ```
 Insert the following configuration block:
 ```nginx
@@ -95,7 +95,7 @@ server {
     listen 80;
     server_name _; # Or use your Pi's IP address (e.g., 192.168.1.100)
 
-    root /var/www/html/pirelay;
+    root /var/www/html/PiGPIOController;
     index index.php index.html;
 
     location / {
@@ -110,7 +110,7 @@ server {
 ```
 Enable the site and reload Nginx:
 ```bash
-sudo ln -s /etc/nginx/sites-available/pirelay /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/PiGPIOController /etc/nginx/sites-enabled/
 sudo rm /etc/nginx/sites-enabled/default # Remove default site configuration if conflicting
 sudo nginx -t
 sudo systemctl restart nginx
