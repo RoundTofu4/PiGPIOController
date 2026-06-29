@@ -244,7 +244,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (pinKeys.length === 0) {
             controlsSection.innerHTML = `
                 <div class="card loading-card">
-                    <p class="empty-state">No controls configured. Click settings gear to add pins.</p>
+                    <p class="empty-state">No controls configured. Click settings gear to configure GPIO pins.</p>
                 </div>
             `;
             monitorListContainer.innerHTML = '<p class="empty-state">No pins to monitor.</p>';
