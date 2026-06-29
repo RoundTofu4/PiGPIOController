@@ -1,0 +1,12 @@
+{
+    "17": {
+        "func": "op",
+        "level": "hi",
+        "raw": "17: op dh pd | hi (Mocked)"
+    },
+    "18": {
+        "func": "ip",
+        "level": "lo",
+        "raw": "18: ip pd | lo (Mocked)"
+    }
+}
