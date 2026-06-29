@@ -75,10 +75,11 @@ function get_mock_state($pins_config) {
     foreach ($pins_config['pins'] as $p) {
         $pin_num = $p['pin'];
         $active_pins[] = $pin_num;
+        $is_output_mode = ($p['mode'] === 'control' || $p['mode'] === 'momentary');
+        $inactive_level = $is_output_mode ? ($p['active_low'] ? 'hi' : 'lo') : 'lo';
         
         if (!isset($mock_state[$pin_num])) {
             // Initialize new mock pin
-            $is_output_mode = ($p['mode'] === 'control' || $p['mode'] === 'momentary');
             $def_level = $is_output_mode ? ($p['active_low'] ? 'hi' : 'lo') : 'lo'; // hi means relay off initially if active_low
             $def_func = $is_output_mode ? 'op' : 'ip';
             $dir_val = ($def_level === 'hi') ? 'dh' : 'dl';
@@ -88,6 +89,13 @@ function get_mock_state($pins_config) {
                 'level' => $def_level,
                 'raw' => "{$pin_num}: {$def_func} {$dir_val} pd | {$def_level} (Mocked)"
             ];
+            $updated = true;
+        } elseif ($p['mode'] === 'momentary' && isset($mock_state[$pin_num]['pulse_until']) && microtime(true) >= $mock_state[$pin_num]['pulse_until']) {
+            $dir_val = ($inactive_level === 'hi') ? 'dh' : 'dl';
+            $mock_state[$pin_num]['func'] = 'op';
+            $mock_state[$pin_num]['level'] = $inactive_level;
+            $mock_state[$pin_num]['raw'] = "{$pin_num}: op {$dir_val} pd | {$inactive_level} (Mocked)";
+            unset($mock_state[$pin_num]['pulse_until']);
             $updated = true;
         }
     }
@@ -245,6 +253,28 @@ function set_pin_state($pin, $level, $is_real_pi, $config) {
     }
 }
 
+// Release a momentary pulse after the response has already returned to the UI.
+function schedule_pin_release($pin, $level, $duration_ms, $is_real_pi, $config) {
+    $duration_ms = max(100, min(5000, (int)$duration_ms));
+    $dir_val = ($level === 'hi') ? 'dh' : 'dl';
+    
+    if ($is_real_pi) {
+        $delay_seconds = number_format($duration_ms / 1000, 3, '.', '');
+        $cmd = '(sleep ' . escapeshellarg($delay_seconds) . '; ' . PINCTRL_CMD . ' set ' . (int)$pin . ' op ' . $dir_val . ') > /dev/null 2>&1 &';
+        @exec($cmd);
+        return true;
+    }
+    
+    $state = get_mock_state($config);
+    if (isset($state[$pin])) {
+        $state[$pin]['pulse_until'] = microtime(true) + ($duration_ms / 1000);
+        save_mock_state($state);
+        return true;
+    }
+    
+    return false;
+}
+
 // Router actions
 $action = isset($_GET['action']) ? $_GET['action'] : 'status';
 $config = get_pin_config();
@@ -294,19 +324,17 @@ if ($action === 'toggle' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $success = false;
     
     if ($pin_conf['mode'] === 'momentary') {
-        // Safe backend Momentary pulse execution
+        // Start a non-blocking backend momentary pulse.
         $active_level = $pin_conf['active_low'] ? 'lo' : 'hi';
         $inactive_level = $pin_conf['active_low'] ? 'hi' : 'lo';
         $duration = isset($pin_conf['pulse_duration']) ? (int)$pin_conf['pulse_duration'] : 1000;
         
-        // 1. Trigger Pulse ON
+        // 1. Trigger Pulse ON and respond immediately so the UI can keep polling.
         $success = set_pin_state($pin, $active_level, $is_real_pi, $config);
         
         if ($success) {
-            // 2. Wait
-            usleep($duration * 1000);
-            // 3. Trigger Pulse OFF (Restore to idle)
-            set_pin_state($pin, $inactive_level, $is_real_pi, $config);
+            // 2. Schedule Pulse OFF (Restore to idle) without blocking this request.
+            schedule_pin_release($pin, $inactive_level, $duration, $is_real_pi, $config);
         }
     } else {
         // Latch mode toggling (Standard control)

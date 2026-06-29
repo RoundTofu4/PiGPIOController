@@ -30,7 +30,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // API URL relative path
     const API_URL = 'api.php';
     let pollingInterval = null;
-    let isRequestPending = false;
+    let isStatusRequestPending = false;
+    const pendingPins = new Set();
     
     // Config state
     let activePins = []; // Stores the current rendered pin configurations
@@ -459,9 +460,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Fetch Status from PHP backend
     async function fetchStatus(isSilent = false) {
-        if (isRequestPending) return;
+        if (isStatusRequestPending) return;
         
-        isRequestPending = true;
+        isStatusRequestPending = true;
         try {
             const response = await fetch(`${API_URL}?action=status`);
             if (!response.ok) {
@@ -478,15 +479,15 @@ document.addEventListener('DOMContentLoaded', () => {
             badgeText.textContent = 'Disconnected';
             logMessage(`API Connection Error: ${error.message}`, 'error');
         } finally {
-            isRequestPending = false;
+            isStatusRequestPending = false;
         }
     }
 
     // Toggle specific GPIO Pin state (Latch mode)
     async function togglePin(pinNum) {
-        if (isRequestPending) return;
+        if (pendingPins.has(pinNum)) return;
         
-        isRequestPending = true;
+        pendingPins.add(pinNum);
         logMessage(`Toggling pin GPIO ${pinNum}...`, 'info');
         
         try {
@@ -514,13 +515,13 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Toggle error:', error);
             logMessage(`Failed to send toggle command: ${error.message}`, 'error');
         } finally {
-            isRequestPending = false;
+            pendingPins.delete(pinNum);
         }
     }
 
     // Pulse specific GPIO Pin state (Momentary mode)
     async function pulsePin(pinNum) {
-        if (isRequestPending) return;
+        if (pendingPins.has(pinNum)) return;
 
         const toggleBtn = document.getElementById(`toggle-btn-${pinNum}`);
         const stateText  = document.getElementById(`state-text-${pinNum}`);
@@ -541,26 +542,22 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         };
 
-        // Lock UI immediately
+        // Mark only this pin as pulsing immediately.
         if (toggleBtn && stateText) {
             toggleBtn.classList.add('pulsing');
             stateText.textContent = 'PULSING...';
             stateText.className   = 'status-value status-val-on';
         }
 
-        isRequestPending = true;
+        pendingPins.add(pinNum);
         logMessage(`Triggering momentary pulse on GPIO ${pinNum} for ${duration}ms...`, 'info');
 
-        // ── Guaranteed fallback timer ───────────────────────────────────────────
-        // Fires at  duration + 1500 ms  regardless of HTTP outcome.
-        // Handles: slow Pi execution, JSON parse errors, Nginx timeouts, etc.
-        // If the HTTP response arrives first, clearTimeout() cancels this timer.
         const fallbackTimer = setTimeout(() => {
             restoreIdleUI();
-            isRequestPending = false;
+            pendingPins.delete(pinNum);
             logMessage(`GPIO ${pinNum} UI restored via fallback timer.`, 'warning');
+            fetchStatus(true);
         }, duration + 1500);
-        // ───────────────────────────────────────────────────────────────────────
 
         try {
             const response = await fetch(`${API_URL}?action=toggle`, {
@@ -569,27 +566,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 body:    JSON.stringify({ pin: pinNum })
             });
 
-            // HTTP response arrived – cancel the fallback, restore UI immediately
-            clearTimeout(fallbackTimer);
-            restoreIdleUI();
-
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
             }
 
             const data = await response.json();
             if (data.success) {
-                logMessage(`GPIO ${pinNum} pulse sequence complete.`, 'success');
+                logMessage(`GPIO ${pinNum} pulse started.`, 'success');
                 updateDashboardUI(data);
+                setTimeout(() => {
+                    clearTimeout(fallbackTimer);
+                    restoreIdleUI();
+                    pendingPins.delete(pinNum);
+                    fetchStatus(true);
+                    logMessage(`GPIO ${pinNum} pulse sequence complete.`, 'success');
+                }, duration);
             } else {
+                clearTimeout(fallbackTimer);
+                restoreIdleUI();
+                pendingPins.delete(pinNum);
                 logMessage(`Pulse failed: ${data.error || 'Server error'}`, 'error');
             }
         } catch (error) {
             clearTimeout(fallbackTimer);
             restoreIdleUI();
+            pendingPins.delete(pinNum);
             logMessage(`Pulse error: ${error.message}`, 'error');
-        } finally {
-            isRequestPending = false;
         }
     }
 
