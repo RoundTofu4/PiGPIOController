@@ -333,7 +333,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!hasControls) {
             controlsSection.innerHTML = `
                 <div class="card loading-card">
-                    <p class="empty-state">No controls configured. Click settings gear to add relay switches.</p>
+                    <p class="empty-state">No controls configured. Click settings gear to configure GPIO pins.</p>
                 </div>
             `;
         }
